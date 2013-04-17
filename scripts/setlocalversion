@@ -164,7 +164,7 @@ else
 	# state and  LOCALVERSION= is not specified
 	if test "${LOCALVERSION+set}" != "set"; then
 		scm=$(scm_version --short)
-		res="$res${scm:++}"
+		#res="$res${scm:++}" {Remove "+" from kernel name}
 	fi
 fi
 
