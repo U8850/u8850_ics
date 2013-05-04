@@ -19,9 +19,8 @@
  *
  * SMP support based on mod by faux123
  *
- * requires to add
- * EXPORT_SYMBOL_GPL(nr_running);
- * at the end of kernel/sched.c
+ * For a general overview of smartassV2 see the relavent part in
+ * Documentation/cpu-freq/governors.txt
  *
  */
 
@@ -42,9 +41,9 @@
 /*
  * The "ideal" frequency to use when awake. The governor will ramp up faster
  * towards the ideal frequency and slower after it has passed it. Similarly,
- * lowering the frequency twards the ideal frequency is faster than below it.
+ * lowering the frequency towards the ideal frequency is faster than below it.
  */
-#define DEFAULT_AWAKE_IDEAL_FREQ 400000
+#define DEFAULT_AWAKE_IDEAL_FREQ 768000
 static unsigned int awake_ideal_freq;
 
 /*
@@ -53,21 +52,23 @@ static unsigned int awake_ideal_freq;
  * that practically when sleep_ideal_freq==0 the awake_ideal_freq is used
  * also when suspended).
  */
-#define DEFAULT_SLEEP_IDEAL_FREQ 400000
+#define DEFAULT_SLEEP_IDEAL_FREQ 245000
 static unsigned int sleep_ideal_freq;
 
 /*
- * Frequency delta when ramping up.
- * zero disables and causes to always jump straight to max frequency.
+ * Freqeuncy delta when ramping up above the ideal freqeuncy.
+ * Zero disables and causes to always jump straight to max frequency.
+ * When below the ideal freqeuncy we always ramp up to the ideal freq.
  */
-#define DEFAULT_RAMP_UP_STEP 100000
+#define DEFAULT_RAMP_UP_STEP 256000
 static unsigned int ramp_up_step;
 
 /*
- * Freqeuncy delta when ramping down.
- * zero disables and will calculate ramp down according to load heuristic.
+ * Freqeuncy delta when ramping down below the ideal freqeuncy.
+ * Zero disables and will calculate ramp down according to load heuristic.
+ * When above the ideal freqeuncy we always ramp down to the ideal freq.
  */
-#define DEFAULT_RAMP_DOWN_STEP 100000
+#define DEFAULT_RAMP_DOWN_STEP 256000
 static unsigned int ramp_down_step;
 
 /*
@@ -84,12 +85,14 @@ static unsigned long min_cpu_load;
 
 /*
  * The minimum amount of time to spend at a frequency before we can ramp up.
+ * Notice we ignore this when we are below the ideal frequency.
  */
 #define DEFAULT_UP_RATE_US 48000;
 static unsigned long up_rate_us;
 
 /*
  * The minimum amount of time to spend at a frequency before we can ramp down.
+ * Notice we ignore this when we are above the ideal frequency.
  */
 #define DEFAULT_DOWN_RATE_US 99000;
 static unsigned long down_rate_us;
@@ -98,7 +101,7 @@ static unsigned long down_rate_us;
  * The frequency to set when waking up from sleep.
  * When sleep_ideal_freq=0 this will have no effect.
  */
-#define DEFAULT_SLEEP_WAKEUP_FREQ 99999999
+#define DEFAULT_SLEEP_WAKEUP_FREQ 1024000
 static unsigned int sleep_wakeup_freq;
 
 /*
@@ -162,14 +165,10 @@ static int cpufreq_governor_smartass(struct cpufreq_policy *policy,
 static
 #endif
 struct cpufreq_governor cpufreq_gov_smartass2 = {
-  .name = "smartassV2",
-  .governor = cpufreq_governor_smartass,
-#if defined(CONFIG_ARCH_MSM_SCORPION)
-  .max_transition_latency = 8000000,
-#else
-  .max_transition_latency = 9000000,
-#endif
-  .owner = THIS_MODULE,
+	.name = "smartassV2",
+	.governor = cpufreq_governor_smartass,
+	.max_transition_latency = 6000000,
+	.owner = THIS_MODULE,
 };
 
 inline static void smartass_update_min_max(struct smartass_info_s *this_smartass, struct cpufreq_policy *policy, int suspend) {
@@ -751,7 +750,7 @@ static void smartass_suspend(int cpu, int suspend)
 	} else {
 		// to avoid wakeup issues with quick sleep/wakeup don't change actual frequency when entering sleep
 		// to allow some time to settle down. Instead we just reset our statistics (and reset the timer).
-		// Eventually, even at full load the timer will lower the freqeuncy.
+		// Eventually, the timer will adjust the frequency if necessary.
 
 		this_smartass->freq_change_time_in_idle =
 			get_cpu_idle_time_us(cpu,&this_smartass->freq_change_time);

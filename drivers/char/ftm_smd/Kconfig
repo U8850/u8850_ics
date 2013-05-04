@@ -1,7 +1,7 @@
 #-------------------------------------------
 # Provide a char type driver of smd for FTM to communicate with modem.
 # Added by Paul Lo.
-menu " FTM communicates with Modem"
+menu "FTM communicates with Modem"
 
 config FTM_SMD
 	tristate "char driver interface and FTM communicating to/from ARM9"

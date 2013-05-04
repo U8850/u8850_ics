@@ -602,10 +602,9 @@ u32 vcd_free_buffers_internal(
 			}
 		}
 
-   /*<DTS2010073100011  penghai 20100731 begin*/
-    	vcd_reset_buffer_pool_for_reuse(buf_pool);
 	}
-/*DTS2010073100011  penghai 20100731 end>*/
+
+	vcd_reset_buffer_pool_for_reuse(buf_pool);
 
 	return rc;
 }
@@ -916,7 +915,8 @@ void vcd_flush_buffers_in_err_fatal(struct vcd_clnt_ctxt *cctxt)
 	vcd_flush_in_use_buffer_pool_entries(cctxt,
 		&cctxt->in_buf_pool, VCD_EVT_RESP_INPUT_FLUSHED);
 	vcd_flush_in_use_buffer_pool_entries(cctxt,
-		&cctxt->out_buf_pool, VCD_EVT_RESP_OUTPUT_FLUSHED);
+		&cctxt->out_buf_pool,	VCD_EVT_RESP_OUTPUT_FLUSHED);
+	cctxt->status.mask |= VCD_FLUSH_ALL;
 	vcd_send_flush_done(cctxt, VCD_S_SUCCESS);
 }
 
@@ -1314,7 +1314,6 @@ u32 vcd_submit_frame(struct vcd_dev_ctxt *dev_ctxt,
 	transc->op_buf_entry = op_buf_entry;
 	transc->ip_frm_tag = ip_frm_entry->ip_frm_tag;
 	transc->time_stamp = ip_frm_entry->time_stamp;
-	transc->flags = ip_frm_entry->flags;
 	ip_frm_entry->ip_frm_tag = (u32) transc;
 	memset(&ddl_ip_frm, 0, sizeof(ddl_ip_frm));
 	memset(&ddl_op_frm, 0, sizeof(ddl_op_frm));
@@ -1789,8 +1788,7 @@ u32 vcd_handle_input_done_in_eos(
 		VCD_MSG_HIGH("Got input done for EOS initiator");
 		transc->input_done = false;
 		transc->in_use = true;
-		if ((codec_config &&
-			 (status != VCD_ERR_BITSTREAM_ERR)) ||
+		if (codec_config ||
 			((status == VCD_ERR_BITSTREAM_ERR) &&
 			 !(cctxt->status.mask & VCD_FIRST_IP_DONE) &&
 			 (core_type == VCD_CORE_720P)))
@@ -1973,7 +1971,6 @@ u32 vcd_handle_frame_done(
 		(struct ddl_frame_data_tag *) payload;
 	struct vcd_transc *transc;
 	u32 rc;
-	s64 time_stamp;
 
 	rc = vcd_validate_io_done_pyld(cctxt, payload, status);
 	if (rc == VCD_ERR_CLIENT_FATAL)
@@ -2015,22 +2012,14 @@ u32 vcd_handle_frame_done(
 	VCD_FAILED_RETURN(rc, "Bad output buffer pointer");
 	op_frm->vcd_frm.time_stamp = transc->time_stamp;
 	op_frm->vcd_frm.ip_frm_tag = transc->ip_frm_tag;
-
-	if (transc->flags & VCD_FRAME_FLAG_EOSEQ)
-		op_frm->vcd_frm.flags |= VCD_FRAME_FLAG_EOSEQ;
-	else
-		op_frm->vcd_frm.flags &= ~VCD_FRAME_FLAG_EOSEQ;
-
 	if (cctxt->decoding)
 		op_frm->vcd_frm.frame = transc->frame;
 	else
 		transc->frame = op_frm->vcd_frm.frame;
 	transc->frame_done = true;
 
-	if (transc->input_done && transc->frame_done) {
-		time_stamp = transc->time_stamp;
+	if (transc->input_done && transc->frame_done)
 		vcd_release_trans_tbl_entry(transc);
-	}
 
 	if (status == VCD_ERR_INTRLCD_FIELD_DROP ||
 		(op_frm->vcd_frm.intrlcd_ip_frm_tag !=
@@ -2038,13 +2027,6 @@ u32 vcd_handle_frame_done(
 		op_frm->vcd_frm.intrlcd_ip_frm_tag)) {
 		vcd_handle_frame_done_for_interlacing(cctxt, transc,
 							  op_frm, status);
-		if (status == VCD_ERR_INTRLCD_FIELD_DROP) {
-			cctxt->callback(VCD_EVT_IND_INFO_FIELD_DROPPED,
-				VCD_S_SUCCESS,
-				&time_stamp,
-				sizeof(time_stamp),
-				cctxt, cctxt->client_data);
-		}
 	}
 
 	if (status != VCD_ERR_INTRLCD_FIELD_DROP) {
@@ -3056,13 +3038,4 @@ void vcd_handle_clnt_fatal_input_done(struct vcd_clnt_ctxt *cctxt,
 	if (cctxt->status.frame_submitted > 0)
 		cctxt->status.frame_submitted--;
 	vcd_handle_clnt_fatal(cctxt, trans_end);
-}
-
-void vcd_handle_ind_info_output_reconfig(
-	struct vcd_clnt_ctxt *cctxt, u32 status)
-{
-	if (cctxt) {
-		cctxt->callback(VCD_EVT_IND_INFO_OUTPUT_RECONFIG, status, NULL,
-		 0, cctxt, cctxt->client_data);
-	}
 }

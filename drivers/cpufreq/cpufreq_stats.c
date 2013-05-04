@@ -80,15 +80,37 @@ static ssize_t show_total_trans(struct cpufreq_policy *policy, char *buf)
 static ssize_t show_time_in_state(struct cpufreq_policy *policy, char *buf)
 {
 	ssize_t len = 0;
-	int i;
+	int i, j;
 	struct cpufreq_stats *stat = per_cpu(cpufreq_stats_table, policy->cpu);
-	if (!stat)
+	struct cpufreq_frequency_table *table = cpufreq_frequency_get_table(policy->cpu);
+	if (!table || !stat)
 		return 0;
 	cpufreq_stats_update(stat->cpu);
-	for (i = 0; i < stat->state_num; i++) {
-		len += sprintf(buf + len, "%u %llu\n", stat->freq_table[i],
-			(unsigned long long)
-			cputime64_to_clock_t(stat->time_in_state[i]));
+	
+	/* Find the offset if any between the cpufreq frequency table and the
+	 * cpustat frequency table.  If the cpufreq frequency table has entries
+	 * in the begininning of the table marked as CPUFREQ_ENTRY_INVALID, and
+	 * the first record of the cpustats frequency table match later, then the
+	 * frequencies were marked as invalid prior to cpufreq's table being built.
+	 * 
+	 * If the tables match up a few records down, this means that the frequencies
+	 * have been marked invalid AFTER cpufreq has created it's 
+	 * frequency table, i.e., someone disabled frequencies */
+	for (j = 0; table[j].frequency; j++) {
+		if (table[j].frequency == stat->freq_table[0])
+			break;
+		if (table[j].frequency == stat->freq_table[j]) {
+			j = 0;
+			break;
+		}
+	}
+	
+	/* Only return those records that are not marked as invalid in the cpufreq
+	 * frequency table. */
+	for (i = 0; i < stat->state_num; i++, j++) {
+		if (table[j].frequency != CPUFREQ_ENTRY_INVALID)
+			len += sprintf(buf + len, "%u %llu\n", stat->freq_table[i],
+				(unsigned long long)cputime64_to_clock_t(stat->time_in_state[i]));
 	}
 	return len;
 }
@@ -165,17 +187,27 @@ static int freq_table_get_index(struct cpufreq_stats *stat, unsigned int freq)
 	return -1;
 }
 
+/* should be called late in the CPU removal sequence so that the stats
+ * memory is still available in case someone tries to use it.
+ */
 static void cpufreq_stats_free_table(unsigned int cpu)
 {
 	struct cpufreq_stats *stat = per_cpu(cpufreq_stats_table, cpu);
-	struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
-	if (policy && policy->cpu == cpu)
-		sysfs_remove_group(&policy->kobj, &stats_attr_group);
 	if (stat) {
 		kfree(stat->time_in_state);
 		kfree(stat);
 	}
 	per_cpu(cpufreq_stats_table, cpu) = NULL;
+}
+
+/* must be called early in the CPU removal sequence (before
+ * cpufreq_remove_dev) so that policy is still valid.
+ */
+static void cpufreq_stats_free_sysfs(unsigned int cpu)
+{
+	struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
+	if (policy && policy->cpu == cpu)
+		sysfs_remove_group(&policy->kobj, &stats_attr_group);
 	if (policy)
 		cpufreq_cpu_put(policy);
 }
@@ -288,11 +320,13 @@ static int cpufreq_stat_notifier_trans(struct notifier_block *nb,
 	old_index = stat->last_index;
 	new_index = freq_table_get_index(stat, freq->new);
 
-	cpufreq_stats_update(freq->cpu);
-	if (old_index == new_index)
+	/* We can't do stat->time_in_state[-1]= .. */
+	if (old_index == -1 || new_index == -1)
 		return 0;
 
-	if (old_index == -1 || new_index == -1)
+	cpufreq_stats_update(freq->cpu);
+
+	if (old_index == new_index)
 		return 0;
 
 	spin_lock(&cpufreq_stats_lock);
@@ -303,6 +337,26 @@ static int cpufreq_stat_notifier_trans(struct notifier_block *nb,
 	stat->total_trans++;
 	spin_unlock(&cpufreq_stats_lock);
 	return 0;
+}
+
+static int cpufreq_stats_create_table_cpu(unsigned int cpu)
+{
+	struct cpufreq_policy *policy;
+	struct cpufreq_frequency_table *table;
+	int ret = -ENODEV;
+	policy = cpufreq_cpu_get(cpu);
+	if (!policy)
+		return -ENODEV;
+	
+	table = cpufreq_frequency_get_table(cpu);
+	if (!table)
+		goto out;
+	
+	ret = cpufreq_stats_create_table(policy, table);
+	
+out:
+	cpufreq_cpu_put(policy);
+	return ret;
 }
 
 static int __cpuinit cpufreq_stat_cpu_callback(struct notifier_block *nfb,
@@ -316,17 +370,21 @@ static int __cpuinit cpufreq_stat_cpu_callback(struct notifier_block *nfb,
 	case CPU_ONLINE_FROZEN:
 		cpufreq_update_policy(cpu);
 		break;
-	case CPU_DEAD:
-	case CPU_DEAD_FROZEN:
-		cpufreq_stats_free_table(cpu);
+	case CPU_DOWN_PREPARE:
+	case CPU_DOWN_PREPARE_FROZEN:
+		cpufreq_stats_free_sysfs(cpu);
 		break;
+	case CPU_DOWN_FAILED:
+	case CPU_DOWN_FAILED_FROZEN:
+	cpufreq_stats_create_table_cpu(cpu);
 	}
 	return NOTIFY_OK;
 }
 
-static struct notifier_block cpufreq_stat_cpu_notifier __refdata =
-{
+/* priority=1 so this will get called before cpufreq_remove_dev */
+static struct notifier_block cpufreq_stat_cpu_notifier __refdata = {
 	.notifier_call = cpufreq_stat_cpu_callback,
+	.priority = 1
 };
 
 static struct notifier_block notifier_policy_block = {
@@ -373,6 +431,7 @@ static void __exit cpufreq_stats_exit(void)
 	unregister_hotcpu_notifier(&cpufreq_stat_cpu_notifier);
 	for_each_online_cpu(cpu) {
 		cpufreq_stats_free_table(cpu);
+		cpufreq_stats_free_sysfs(cpu);
 	}
 }
 

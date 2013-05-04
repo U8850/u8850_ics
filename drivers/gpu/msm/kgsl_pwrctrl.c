@@ -13,6 +13,7 @@
 #include <linux/interrupt.h>
 #include <mach/msm_iomap.h>
 #include <mach/msm_bus.h>
+#include <mach/socinfo.h>
 #include <mach/internal_power_rail.h>
 
 #include "kgsl.h"
@@ -25,7 +26,6 @@
 #define KGSL_PWRFLAGS_AXI_ON   2
 #define KGSL_PWRFLAGS_IRQ_ON   3
 
-#define GPU_SWFI_LATENCY       3
 #define UPDATE_BUSY_VAL		1000000
 #define UPDATE_BUSY		50
 
@@ -90,7 +90,7 @@ static int __gpuclk_store(int max, struct device *dev,
 	if (pwr->pwrlevels[pwr->active_pwrlevel].gpu_freq >
 	    pwr->pwrlevels[pwr->thermal_pwrlevel].gpu_freq)
 		kgsl_pwrctrl_pwrlevel_change(device, pwr->thermal_pwrlevel);
-	else if (!max || (NULL == device->pwrscale.policy))
+	else if (!max)
 		kgsl_pwrctrl_pwrlevel_change(device, i);
 
 done:
@@ -696,9 +696,8 @@ _sleep(struct kgsl_device *device)
 		_sleep_accounting(device);
 		kgsl_pwrctrl_clk(device, KGSL_PWRFLAGS_OFF);
 		kgsl_pwrctrl_set_state(device, KGSL_STATE_SLEEP);
-		wake_unlock(&device->idle_wakelock);
-                pm_qos_update_request(&device->pm_qos_req_dma,
-                                        PM_QOS_DEFAULT_VALUE);
+		if (device->idle_wakelock.name)
+			wake_unlock(&device->idle_wakelock);
 		break;
 	case KGSL_STATE_SLEEP:
 	case KGSL_STATE_SLUMBER:
@@ -809,9 +808,8 @@ void kgsl_pwrctrl_wake(struct kgsl_device *device)
 		mod_timer(&device->idle_timer,
 				jiffies + device->pwrctrl.interval_timeout);
 
-		wake_lock(&device->idle_wakelock);
-                pm_qos_update_request(&device->pm_qos_req_dma,
-                                GPU_SWFI_LATENCY);
+		if (device->idle_wakelock.name)
+			wake_lock(&device->idle_wakelock);
 	case KGSL_STATE_ACTIVE:
 		break;
 	default:

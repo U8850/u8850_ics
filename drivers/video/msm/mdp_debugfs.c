@@ -1,4 +1,4 @@
-/* Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2009-2010, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -319,17 +319,17 @@ static ssize_t mdp_stat_read(
 	dlen -= len;
 	len = snprintf(bp, dlen, "unerrun_external:  %08lu\n\n",
 					mdp4_stat.intr_underrun_e);
-					
-    bp += len;
-	dlen -= len;
-	len = snprintf(bp, dlen, "intr_dsi  :    %08lu\n\n",
-					mdp4_stat.intr_dsi);
+
 	bp += len;
 	dlen -= len;
 	spin_unlock_irqrestore(&mdp_spin_lock, flag);
 
 	len = snprintf(bp, dlen, "kickoff_mddi:      %08lu\n",
 					mdp4_stat.kickoff_mddi);
+	bp += len;
+	dlen -= len;
+	len = snprintf(bp, dlen, "kickoff_piggyback: %08lu\n",
+					mdp4_stat.kickoff_piggy);
 	bp += len;
 	dlen -= len;
 	len = snprintf(bp, dlen, "kickoff_lcdc:      %08lu\n",
@@ -346,11 +346,7 @@ static ssize_t mdp_stat_read(
 	bp += len;
 	dlen -= len;
 	len = snprintf(bp, dlen, "kickoff_dsi:       %08lu\n\n",
-					mdp4_stat.kickoff_dsi);	
-	bp += len;
-	dlen -= len;
-	len = snprintf(bp, dlen, "writeback:      %08lu\n",
-					mdp4_stat.writeback);					
+					mdp4_stat.kickoff_dsi);
 	bp += len;
 	dlen -= len;
 	len = snprintf(bp, dlen, "overlay0_set:   %08lu\n",
@@ -388,11 +384,6 @@ static ssize_t mdp_stat_read(
 	bp += len;
 	dlen -= len;
 	len = snprintf(bp, dlen, "pipe_vg2:   %08lu\n\n", mdp4_stat.pipe[3]);
-	
-	bp += len;
-	dlen -= len;
-	len = snprintf(bp, dlen, "dsi_clkoff: %08lu\n\n", mdp4_stat.dsi_clkoff);
-	
 	bp += len;
 	dlen -= len;
 	len = snprintf(bp, dlen, "err_mixer:  %08lu\n", mdp4_stat.err_mixer);
